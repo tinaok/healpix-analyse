@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import time
 import tracemalloc
 from dataclasses import asdict
@@ -22,14 +23,35 @@ from healpix_analyse.radial_filter import gaussian_filter
 APPLICATION_CASES = {"S2-G04": 3.0, "S2-G05": 5.0}
 
 
-def _timed(function):
+def _runtime(function, *, warmups, repeats):
+    """Measure runtime without memory tracing instrumentation."""
+    if warmups < 0:
+        raise ValueError("warmups must be non-negative")
+    if repeats < 1:
+        raise ValueError("repeats must be positive")
+    for _ in range(warmups):
+        function()
+    samples = []
+    value = None
+    for _ in range(repeats):
+        start = time.perf_counter()
+        value = function()
+        samples.append(time.perf_counter() - start)
+    return value, {
+        "median": statistics.median(samples),
+        "minimum": min(samples),
+        "maximum": max(samples),
+        "repeats": repeats,
+    }
+
+
+def _peak_memory(function):
+    """Measure Python-tracked peak memory in a separate invocation."""
     tracemalloc.start()
-    start = time.perf_counter()
     value = function()
-    elapsed = time.perf_counter() - start
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-    return value, elapsed, peak
+    return value, peak
 
 
 def _normalized_cartesian(values, valid, sigma_px, truncate):
@@ -78,7 +100,18 @@ def _patch(face, level, size, location):
     return cells, (size, size)
 
 
-def benchmark_case(*, name, level, face, size, location, sigma_px, truncate):
+def benchmark_case(
+    *,
+    name,
+    level,
+    face,
+    size,
+    location,
+    sigma_px,
+    truncate,
+    warmups=1,
+    repeats=3,
+):
     cells, shape = _patch(face, level, size, location)
     yy, xx = np.indices(shape)
     values_2d = (
@@ -91,41 +124,54 @@ def benchmark_case(*, name, level, face, size, location, sigma_px, truncate):
     dx_m, dy_m = _calibrate(int(cells[cells.size // 2]), level)
     sigma_m = sigma_px * np.sqrt(dx_m * dy_m)
 
-    exact, exact_seconds, exact_peak = _timed(
-        lambda: gaussian_filter(
-            values,
-            cells,
-            level,
-            sigma_m=sigma_m,
-            truncate=truncate,
-        )
+    exact_call = lambda: gaussian_filter(
+        values,
+        cells,
+        level,
+        sigma_m=sigma_m,
+        truncate=truncate,
     )
-    cartesian, cart_seconds, cart_peak = _timed(
-        lambda: _normalized_cartesian(values_2d, valid, sigma_px, truncate)
+    cartesian_call = lambda: _normalized_cartesian(values_2d, valid, sigma_px, truncate)
+    face_call = lambda: face_native_gaussian_filter(
+        values,
+        cells,
+        level,
+        sigma_m=sigma_m,
+        truncate=truncate,
+        return_stats=True,
     )
 
-    _clear_filter_caches()
-    (face_cold, cold_stats), cold_seconds, cold_peak = _timed(
-        lambda: face_native_gaussian_filter(
-            values,
-            cells,
-            level,
-            sigma_m=sigma_m,
-            truncate=truncate,
-            return_stats=True,
-        )
+    exact, exact_runtime = _runtime(
+        exact_call,
+        warmups=warmups,
+        repeats=repeats,
     )
-    (face_cached, cached_stats), cached_seconds, cached_peak = _timed(
-        lambda: face_native_gaussian_filter(
-            values,
-            cells,
-            level,
-            sigma_m=sigma_m,
-            truncate=truncate,
-            return_stats=True,
-        )
+    cartesian, cart_runtime = _runtime(
+        cartesian_call,
+        warmups=warmups,
+        repeats=repeats,
+    )
+
+    def cold_face_call():
+        _clear_filter_caches()
+        return face_call()
+
+    (face_cold, cold_stats), cold_runtime = _runtime(
+        cold_face_call,
+        warmups=0,
+        repeats=repeats,
+    )
+    (face_cached, cached_stats), cached_runtime = _runtime(
+        face_call,
+        warmups=warmups,
+        repeats=repeats,
     )
     np.testing.assert_allclose(face_cold, face_cached, rtol=0.0, atol=0.0)
+
+    _, exact_peak = _peak_memory(exact_call)
+    _, cart_peak = _peak_memory(cartesian_call)
+    _, cold_peak = _peak_memory(cold_face_call)
+    _, cached_peak = _peak_memory(face_call)
 
     difference_exact = face_cached - exact
     difference_cartesian = face_cached - cartesian.ravel()
@@ -140,10 +186,10 @@ def benchmark_case(*, name, level, face, size, location, sigma_px, truncate):
         "sigma_m": sigma_m,
         "truncate": truncate,
         "runtime_seconds": {
-            "exact": exact_seconds,
-            "cartesian": cart_seconds,
-            "face_cold": cold_seconds,
-            "face_cached": cached_seconds,
+            "exact": exact_runtime,
+            "cartesian": cart_runtime,
+            "face_cold": cold_runtime,
+            "face_cached": cached_runtime,
         },
         "peak_memory_bytes": {
             "exact": exact_peak,
@@ -168,7 +214,7 @@ def benchmark_case(*, name, level, face, size, location, sigma_px, truncate):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", type=int, default=6)
+    parser.add_argument("--level", type=int, default=20)
     parser.add_argument("--size", type=int, default=16)
     parser.add_argument("--face", type=int, default=4)
     parser.add_argument(
@@ -176,6 +222,8 @@ def main():
     )
     parser.add_argument("--sigma-px", type=float, default=3.0)
     parser.add_argument("--truncate", type=float, default=4.0)
+    parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument(
         "--suite",
         action="store_true",
@@ -202,6 +250,8 @@ def main():
             location=location,
             sigma_px=sigma_px,
             truncate=args.truncate,
+            warmups=args.warmups,
+            repeats=args.repeats,
         )
         print(json.dumps(record, sort_keys=True))
 

@@ -1,56 +1,82 @@
-# Issue 40 prototype smoke results
+# Issue 40 level-20 S2MSI benchmark results
 
-These measurements validate the benchmark and expose the first-order tradeoff;
-they are not production performance claims. They were collected on an arm64
-development Mac with Python 3.12, level 6, `truncate=4`, and tracemalloc enabled.
-Values are a deterministic smooth synthetic field.
+These measurements validate the prototype at the HEALPix level used for the
+S2MSI comparison. They are not production performance claims.
+
+The run used:
+
+- HEALPix level 20 (`nside = 1,048,576`);
+- an arm64 development Mac with Python 3.12;
+- `truncate=4`;
+- one warm-up and three measured repetitions;
+- median wall-clock runtime measured without `tracemalloc`;
+- Python-tracked peak memory measured in a separate invocation;
+- a deterministic smooth synthetic field.
+
+At the representative locations, S2-G04 (`sigma=3 px`) corresponds to
+approximately 18.66-20.44 m and S2-G05 (`sigma=5 px`) to approximately
+31.11-34.06 m. The range comes from face/location-dependent WGS84 calibration.
 
 ## Location and face matrix
 
-The S2-G04 (`sigma=3 px`) and S2-G05 (`sigma=5 px`) suite used 16 x 16
-patches on north, equatorial, and south faces, both inside a face and across a
-single edge.
+The suite used 16 x 16 patches on north, equatorial and south faces, both
+inside a face and across one face edge.
 
-| Case | Exact runtime | Face runtime | RMSE vs exact | Fallback |
-|---|---:|---:|---:|---:|
-| S2-G04, all 6 locations | 0.325-0.434 s | 0.017-0.032 s | 0.0068-0.1622 | 0 |
-| S2-G05, 5 no-fallback locations | 0.509-0.595 s | 0.024-0.045 s | 0.0055-0.0490 | 0 |
-| S2-G05, north-face edge | 0.617 s | 0.619 s | 0.1249 | 32 / 2304 halo cells |
+| Case | SciPy | Exact WGS84 | Face-native | Exact / face | RMSE vs exact | Fallback |
+|---|---:|---:|---:|---:|---:|---:|
+| S2-G04, 6 locations | 0.024-0.027 ms | 185.8-203.0 ms | 2.225-3.560 ms | 54-87x | 0.00515-0.20755 | 0 |
+| S2-G05, 6 locations | 0.026-0.028 ms | 239.3-273.9 ms | 2.283-3.930 ms | 62-111x | 0.00508-0.15694 | 0 |
 
-For no-fallback cases, the prototype was roughly 12-23 times faster than the
-exact implementation in this small run. Peak Python-tracked memory was roughly
-0.16-0.28 MB for face-native versus 7.9-9.1 MB for exact. The north-face edge
-S2-G05 case affected 16 outputs; its exact correction raised face-native peak
-memory to 9.3 MB and removed the speed advantage.
+SciPy operates on an already materialized Cartesian array and therefore
+remains an idealized filtering lower bound. It does not include HEALPix face
+setup, topology-aware halo construction, or restoration to `cell_ids` order.
+The complete face-native path was approximately 82-148 times slower than this
+SciPy-only lower bound, but 54-111 times faster than exact WGS84 filtering.
 
-The largest errors occurred on the north-face edge, where the calibrated x/y
-scales were strongly anisotropic. The equatorial-face cases had much smaller
-RMSE. This confirms that patch location and face matter and that the exact
-implementation must remain the reference.
+Peak Python-tracked memory was approximately:
 
-## Patch-size scaling at an equatorial face interior
+| Case | Exact WGS84 | Face-native |
+|---|---:|---:|
+| S2-G04 | 7.94-8.00 MB | 0.160-0.170 MB |
+| S2-G05 | 9.05-9.08 MB | 0.270-0.282 MB |
 
-| Size | Sigma | Exact | Face | RMSE vs exact | Exact / face peak memory |
-|---:|---:|---:|---:|---:|---:|
-| 8 x 8 | 3 | 0.091 s | 0.013 s | 0.0158 | 0.58 / 0.09 MB |
-| 8 x 8 | 5 | 0.158 s | 0.025 s | 0.0098 | 0.72 / 0.18 MB |
-| 16 x 16 | 3 | 0.420 s | 0.019 s | 0.0178 | 7.95 / 0.17 MB |
-| 16 x 16 | 5 | 0.724 s | 0.035 s | 0.0172 | 9.08 / 0.28 MB |
-| 32 x 32 | 3 | 1.904 s | 0.042 s | 0.0112 | 52.49 / 0.44 MB |
-| 32 x 32 | 5 | 3.376 s | 3.431 s | 0.0154 | 112.57 / 113.09 MB |
+No level-20 S2-G04/G05 case used corner or multi-edge fallback. Unlike the
+earlier low-level topology smoke run, a 12- or 20-cell halo is tiny relative
+to a level-20 face width.
 
-The final case has a 20-cell halo around a 32-cell patch on a 64-cell-wide
-face. That support reaches face corners and invokes exact fallback, erasing the
-performance benefit. This is useful evidence for the next design step: a true
-multi-hop/corner topology primitive is important for large supports and
-tile-scale readiness.
+The largest errors occurred on the north-face edge. Its representative metric
+was strongly anisotropic (`dx` approximately 9.16 m and `dy` approximately
+5.07 m), whereas equatorial edge cases had much smaller RMSE. This confirms
+that location-dependent approximation error, rather than fallback, is the
+main accuracy concern for these level-20 S2 cases.
+
+## Patch-size scaling at a level-20 equatorial face interior
+
+| Size | Sigma | SciPy | Exact WGS84 | Face-native | RMSE vs exact | Exact / face peak memory |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 x 8 | 3 | 0.023 ms | 40.946 ms | 2.026 ms | 0.01585 | 0.578 / 0.091 MB |
+| 8 x 8 | 5 | 0.022 ms | 59.303 ms | 2.059 ms | 0.00984 | 0.723 / 0.182 MB |
+| 16 x 16 | 3 | 0.027 ms | 180.514 ms | 2.194 ms | 0.01826 | 7.950 / 0.170 MB |
+| 16 x 16 | 5 | 0.027 ms | 237.993 ms | 2.341 ms | 0.01753 | 9.075 / 0.278 MB |
+| 32 x 32 | 3 | 0.038 ms | 793.454 ms | 2.642 ms | 0.01275 | 52.484 / 0.451 MB |
+| 32 x 32 | 5 | 0.044 ms | 1079.156 ms | 3.128 ms | 0.01733 | 112.579 / 0.595 MB |
+
+No patch-size case used fallback. Exact runtime and memory grew rapidly with
+the number of target cells and Gaussian support. Face-native runtime grew much
+more slowly because its approximately 2-4 ms topology/setup cost dominates the
+roughly 0.05-0.19 ms separable Gaussian passes at these patch sizes.
 
 ## Initial decision
 
-Candidate A is worth advancing for compact patches whose support avoids face
-corners: the separable filtering itself is fast, normalized convolution is
-stable, and single-edge routing retains a substantial speed advantage. It is
-not yet production-ready for corner-heavy or large-support patches because the
-correctness fallback can dominate runtime and memory. Accuracy also requires
-further application-specific acceptance thresholds, especially on anisotropic
-north/south face locations.
+At level 20, Candidate A is worth advancing for S2MSI-scale local patches:
+
+- it was 54-111 times faster than exact WGS84 in the face/location matrix;
+- its runtime scaled much more slowly than exact filtering from 8 x 8 through
+  32 x 32 patches;
+- its Python-tracked peak memory was substantially lower;
+- single-edge cases required no correctness fallback at S2-G04/G05 support.
+
+It is not yet production-ready. North-face edge accuracy requires explicit
+application acceptance thresholds, and true tile-scale testing remains future
+work. The next performance target is topology/setup reuse and vectorization,
+not the already-small separable Gaussian passes.

@@ -137,6 +137,53 @@ def test_xy_and_yx_passes_are_equivalent():
     np.testing.assert_allclose(xy, yx, rtol=2e-15, atol=2e-15)
 
 
+@pytest.mark.parametrize("sigma_px", [3.0, 5.0], ids=["S2-G04", "S2-G05"])
+def test_level20_s2_fixed_sigma_matches_exact_reference(sigma_px):
+    """Exercise application-derived S2 scales at the S2MSI HEALPix level."""
+    level = 20
+    nside = 1 << level
+    size = 16
+    start = (nside - size) // 2
+    cells = _rectangle(
+        4,
+        start,
+        start + size,
+        start,
+        start + size,
+        level,
+    )
+    yy, xx = np.indices((size, size))
+    values = (
+        np.sin(xx / (size / 5.0)) + 0.6 * np.cos(yy / (size / 7.0)) + 0.02 * xx
+    ).ravel()
+    sigma_m = sigma_px * _spacing(int(cells[cells.size // 2]), level)
+
+    face, stats = face_native_gaussian_filter(
+        values,
+        cells,
+        level,
+        sigma_m=sigma_m,
+        return_stats=True,
+    )
+    reverse = face_native_gaussian_filter(
+        values,
+        cells,
+        level,
+        sigma_m=sigma_m,
+        pass_order="yx",
+    )
+    exact = gaussian_filter(
+        values,
+        cells,
+        level,
+        sigma_m=sigma_m,
+    )
+
+    np.testing.assert_allclose(face, reverse, rtol=2e-15, atol=2e-15)
+    assert stats.fallback_output_cells == 0
+    assert np.sqrt(np.mean((face - exact) ** 2)) < 0.05
+
+
 def test_single_edge_patch_uses_transform_without_fallback():
     level = 5
     nside = 1 << level
