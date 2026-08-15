@@ -161,6 +161,11 @@ from healpix_analyse.radial_filter import (
     radial_filter,
 )
 
+from healpix_analyse.face_gaussian_filter import (
+    FaceNativeGaussianStats,
+    face_native_gaussian_filter,
+)
+
 __all__ = [
     # ------------------------------------------------------------------
     # Multi-resolution operators
@@ -233,6 +238,8 @@ __all__ = [
     # ------------------------------------------------------------------
     "radial_filter",
     "gaussian_filter",
+    "FaceNativeGaussianStats",
+    "face_native_gaussian_filter",
 
     # ------------------------------------------------------------------
     # HEALPix scalar-field gradients

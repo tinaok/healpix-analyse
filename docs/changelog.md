@@ -14,6 +14,9 @@
   buffers.
 
 ### Added
+- Experimental `face_native_gaussian_filter` with patch-level WGS84 metric
+  calibration, face-topology halos, normalized convolution, exact corner
+  fallback, diagnostics, and benchmarks (issue #40).
 - `HealPixResampler` and `resample_healpix`: reusable and one-shot local
   resampling between full or partial NESTED HEALPix levels, with NaN support.
 - `HealPixDivCurl` and `HealPixMultiScaleDivCurl`: fixed gauge-aware

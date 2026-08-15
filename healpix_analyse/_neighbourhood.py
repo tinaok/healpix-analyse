@@ -417,6 +417,41 @@ def relative_geometry_from_neighbours(
     )
 
 
+def _wgs84_distance(
+    center_ids: np.ndarray,
+    neighbour_ids: np.ndarray,
+    refinement_level: int,
+) -> np.ndarray:
+    """Return exact WGS84 centre-to-centre distances for cell pairs.
+
+    This small vectorised helper is intentionally private.  It gives
+    approximate, topology-native algorithms a single reference operation for
+    local metric calibration without duplicating coordinate conversion or
+    geodesic conventions.
+    """
+    centers = np.asarray(center_ids, dtype=np.uint64)
+    neighbours = np.asarray(neighbour_ids, dtype=np.uint64)
+    centers, neighbours = np.broadcast_arrays(centers, neighbours)
+
+    center_lon, center_lat = nested.healpix_to_lonlat(
+        centers,
+        refinement_level,
+        ellipsoid="WGS84",
+    )
+    neighbour_lon, neighbour_lat = nested.healpix_to_lonlat(
+        neighbours,
+        refinement_level,
+        ellipsoid="WGS84",
+    )
+    _, _, distance_m = _WGS84.inv(
+        center_lon,
+        center_lat,
+        neighbour_lon,
+        neighbour_lat,
+    )
+    return np.asarray(distance_m, dtype=np.float64)
+
+
 def build_relative_geometry(
     cells: np.ndarray,
     refinement_level: int,

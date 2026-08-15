@@ -204,6 +204,14 @@ Metric radial and Gaussian filtering on HEALPix using physical
 WGS84 distances and shared weighted-neighbour aggregation.
 :::
 
+:::{grid-item-card} Face-native Gaussian prototype
+:link: face_gaussian_filter
+:link-type: doc
+
+Experimental separable Gaussian filtering on NESTED face tiles, with
+topology-aware halos and exact WGS84 corner fallback.
+:::
+
 
 :::{grid-item-card} Directional filtering
 :link: directional_filter
