@@ -25,9 +25,10 @@
   from land are untouched and keep the plain operator; only the rows near
   blocked cells are searched. Without blocked cells the operator is the same
   as before.
-- `multiorder_filter_operator`: a Gaussian filter operator on a mixed-level set of
-  HEALPix leaves (a river at a fine level opening into a sea at a coarse one).
-  Land is a place without a leaf, or a blocked leaf; the kernel acts on the
+- `multiorder_filter_operator`: a Gaussian filter operator on a mixed-level
+  set of HEALPix leaves (a river at a fine level opening into a sea at a
+  coarse one). Land is a place without a leaf, or a blocked leaf (with
+  `correction="lattice"` only blocked leaves are land); the kernel acts on the
   shortest path through water over edge and corner contacts across levels (2:1
   balanced input, checked), with leaf areas (and an optional wet fraction) in
   the weights. `normalization="source"` conserves the total exactly; with one
